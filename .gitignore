@@ -26,3 +26,8 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+#Basestation trash
+Basestation-Dashboard/data/basestation.db
+Basestation-Dashboard/data/last_mission.json
+Basestation-Dashboard/data/log_data.jsonl
