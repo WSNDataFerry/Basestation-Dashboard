@@ -243,6 +243,9 @@ def send_selected():
         for node_id in selected:
             if node_id in nodes:
                 ordered[node_id] = nodes[node_id]
+                # Ensure height_from_the_ground is always a float for ROS2 compatibility
+                if 'height_from_the_ground' in ordered[node_id]:
+                    ordered[node_id]['height_from_the_ground'] = float(ordered[node_id]['height_from_the_ground'])
 
         if not ordered:
             return jsonify({"error": "No matching nodes found for selection"}), 400
