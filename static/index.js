@@ -39,10 +39,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveBtn = document.getElementById('save-chs-btn');
     if (saveBtn) saveBtn.addEventListener('click', () => toggleCHEditMode());
 
-    // Start mission button
-    const startBtn = document.getElementById('start-mission-btn');
-    if (startBtn) startBtn.addEventListener('click', () => openMissionEditor());
-
     // Back button
     document.getElementById('back-btn').addEventListener('click', () => {
         switchView('overview');
@@ -76,8 +72,61 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     if (startWp) startWp.addEventListener('click', () => {
-        // Start waypoint — left blank for later implementation
-        console.log('Start Waypoint pressed (not implemented)');
+        // Build ordered selection from user-clicked waypoints but only include CH nodes
+        (async () => {
+            console.log('Start Waypoint pressed');
+            if (!state.waypoints || state.waypoints.length === 0) return alert('No waypoints selected.');
+
+            // Preserve user click order and include only nodes flagged as CH in config
+            const orderedIds = [];
+            for (const wp of state.waypoints) {
+                const id = wp.id;
+                const cfg = state.config[id] || {};
+                if (cfg.is_ch) {
+                    if (!orderedIds.includes(id)) orderedIds.push(id);
+                }
+            }
+
+            if (orderedIds.length === 0) return alert('No cluster-head nodes selected in the current waypoint list.');
+
+            // Build nodes mapping for the selected IDs using waypoint coords when available,
+            // falling back to config defaults.
+            const nodes = {};
+            for (const id of orderedIds) {
+                const cfg = state.config[id] || {};
+                // Try to use the first matching waypoint coordinates
+                const wp = state.waypoints.find(w => w.id === id) || {};
+                nodes[id] = {
+                    gps_lat: wp.lat ?? cfg.lat ?? null,
+                    gps_lon: wp.lng ?? cfg.lng ?? null,
+                    height_from_the_ground: cfg.default_height ?? 5.0,
+                    hover: !!cfg.default_hover,
+                    is_ch: true
+                };
+                if (cfg.default_rtl) nodes[id].rtl = !!cfg.default_rtl;
+                if (cfg.default_land) nodes[id].land = !!cfg.default_land;
+            }
+
+            // Send ordered selection to backend which will forward to the socket server
+            try {
+                const resp = await fetch('/api/send_selected', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ selected: orderedIds, nodes })
+                });
+                const j = await resp.json();
+                if (resp.ok) {
+                    alert('Waypoint list sent successfully');
+                    // optionally clear waypoints or exit waypoint mode
+                    // clearWaypoints();
+                } else {
+                    alert('Failed to send waypoints: ' + (j.error || JSON.stringify(j)));
+                }
+            } catch (e) {
+                console.error('Error sending selected waypoints', e);
+                alert('Error sending selected waypoints (see console)');
+            }
+        })();
     });
     if (clearWp) clearWp.addEventListener('click', () => {
         clearWaypoints();
@@ -243,93 +292,6 @@ async function saveCHs() {
 }
 
 // (removed) persistent silent CH save helper — CH persistence now handled by explicit Save action
-
-// Start a waypoint mission using selected CHs. Builds a payload from state.config
-async function startMission() {
-    // legacy: now handled by modal; kept for compatibility
-    openMissionEditor();
-}
-
-function openMissionEditor() {
-    const selected = [];
-    Object.keys(state.config).forEach(k => { if (state.config[k] && state.config[k].is_ch) selected.push(k); });
-    if (selected.length === 0) return alert('No cluster heads selected. Toggle CH on markers and save CHs first.');
-
-    const body = document.getElementById('mission-modal-body');
-    body.innerHTML = '';
-
-    selected.forEach(nodeId => {
-        const cfg = state.config[nodeId] || {};
-        const row = document.createElement('div');
-        row.className = 'mission-node-row';
-        row.innerHTML = `
-            <h4>Node ${nodeId} - ${cfg.name || ''}</h4>
-            <label>Latitude: <input class="mission-input" data-node="${nodeId}" data-field="gps_lat" value="${cfg.lat||''}"></label>
-            <label>Longitude: <input class="mission-input" data-node="${nodeId}" data-field="gps_lon" value="${cfg.lng||''}"></label>
-            <label>Height (m): <input class="mission-input" data-node="${nodeId}" data-field="height_from_the_ground" value="${cfg.default_height||5.0}" type="number" step="0.1"></label>
-            <label>Hover: <input class="mission-input" data-node="${nodeId}" data-field="hover" type="checkbox" ${cfg.default_hover ? 'checked':''}></label>
-            <label>RTL after mission: <input class="mission-input" data-node="${nodeId}" data-field="rtl" type="checkbox" ${cfg.default_rtl ? 'checked':''}></label>
-            <label>Land after mission: <input class="mission-input" data-node="${nodeId}" data-field="land" type="checkbox" ${cfg.default_land ? 'checked':''}></label>
-            <hr/>
-        `;
-        body.appendChild(row);
-    });
-
-    // Show modal
-    const modal = document.getElementById('mission-modal');
-    modal.classList.remove('hidden');
-
-    // Wire buttons
-    document.getElementById('mission-modal-close').onclick = closeMissionModal;
-    document.getElementById('mission-cancel').onclick = closeMissionModal;
-    document.getElementById('mission-launch').onclick = submitMissionFromModal;
-}
-
-function closeMissionModal() {
-    document.getElementById('mission-modal').classList.add('hidden');
-}
-
-async function submitMissionFromModal() {
-    // Collect inputs
-    const inputs = Array.from(document.querySelectorAll('.mission-input'));
-    const payload = {};
-    const nodes = new Set();
-    inputs.forEach(inp => {
-        const node = inp.dataset.node;
-        const field = inp.dataset.field;
-        nodes.add(node);
-        if (!payload[`node_${node}`]) payload[`node_${node}`] = {};
-        if (inp.type === 'checkbox') payload[`node_${node}`][field] = inp.checked;
-        else if (inp.type === 'number') payload[`node_${node}`][field] = parseFloat(inp.value);
-        else payload[`node_${node}`][field] = inp.value === '' ? null : (isNaN(inp.value) ? inp.value : (inp.value.includes('.') ? parseFloat(inp.value) : parseInt(inp.value)));
-    });
-
-    // Validate GPS coords
-    for (const key of Object.keys(payload)) {
-        const p = payload[key];
-        if (!p.gps_lat || !p.gps_lon) {
-            if (!confirm(`${key} missing lat/lon. Continue anyway?`)) return;
-        }
-    }
-
-    try {
-        const resp = await fetch('/api/mission', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mission_type: 'waypoint', payload })
-        });
-        const j = await resp.json();
-        if (resp.ok) {
-            alert('Mission submitted: ' + JSON.stringify(j.detail || j));
-            closeMissionModal();
-        } else {
-            alert('Mission failed: ' + (j.error || JSON.stringify(j)));
-        }
-    } catch (e) {
-        console.error('submitMissionFromModal error', e);
-        alert('Error submitting mission (see console)');
-    }
-}
 
 // Drone layer initialization
 function initDroneLayer() {
@@ -521,7 +483,7 @@ async function fetchTelemetryData() {
 
 // Data Processing
 function processData(rawData) {
-    if (!rawData || rawData.length === 0) return;
+    if (!rawData) return;
 
     // Group data by node ID and discover clusters
     const groupedData = new Map();

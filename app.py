@@ -3,11 +3,14 @@ import json
 from flask import Flask, jsonify, render_template, request, Response, stream_with_context
 import threading
 import queue
+import socket
+import sqlite3
+import db as dashboard_db
 
 app = Flask(__name__)
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 # New canonical log file (NDJSON lines) — renamed from mock_data.jsonl
-LOG_FILE = os.path.join(DATA_DIR, 'log_data.json')
+LOG_FILE = os.path.join(DATA_DIR, 'log_data.jsonl')
 
 CONFIG_FILE = os.path.join(DATA_DIR, 'nodes_config.json')
 
@@ -33,9 +36,49 @@ def get_data():
     Reads all NDJSON files (*.jsonl) in the data directory
     and returns a clean JSON array mapping to the frontend.
     """
-    records = []
-
+    # Prefer DB-backed data if available
     try:
+        db_path = os.path.join(os.path.dirname(__file__), 'data', 'basestation.db')
+        if os.path.exists(db_path):
+            # read all configured nodes and return recent samples
+            try:
+                cfg = {}
+                if os.path.exists(CONFIG_FILE):
+                    with open(CONFIG_FILE, 'r') as f:
+                        cfg = json.load(f)
+                records = []
+                for node_id in cfg.keys():
+                    recs = dashboard_db.query_recent(node_id, limit=50, db_path=db_path)
+                    for r in recs:
+                        # normalize output to match previous NDJSON shape when possible
+                        out = r.get('payload') if isinstance(r.get('payload'), dict) else {}
+                        out.update({
+                            "_rowid": r.get('rowid'),
+                            "_received_at": r.get('received_at')
+                        })
+                        records.append(out)
+                # Also include drone telemetry records from log files (DB only stores WSN node data)
+                for log_name in ['log_data.jsonl', 'log_data.json']:
+                    candidate = os.path.join(DATA_DIR, log_name)
+                    if os.path.exists(candidate):
+                        with open(candidate, 'r') as lf:
+                            for line in lf:
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                try:
+                                    obj = json.loads(line)
+                                    if obj.get('type') == 'drone' and obj.get('lat') is not None:
+                                        records.append(obj)
+                                except json.JSONDecodeError:
+                                    pass
+                        break  # use the first log file found
+                return jsonify({"status": "success", "count": len(records), "data": records})
+            except Exception as e:
+                return jsonify({"error": f"DB read error: {e}"}), 500
+
+        # Fallback to file-based NDJSON if DB not present
+        records = []
         # Construct the path and find the NDJSON file(s) we care about.
         # If the canonical `log_data.json` exists, use only that to avoid duplicates.
         log_path = os.path.join(DATA_DIR, 'log_data.json')
@@ -46,11 +89,7 @@ def get_data():
             jsonl_files = [f for f in os.listdir(DATA_DIR) if f.endswith('.jsonl')]
 
         if not jsonl_files:
-            return jsonify({
-                "status": "success",
-                "count": 0,
-                "data": []
-            })
+            return jsonify({"status": "success", "count": 0, "data": []})
 
         for file_name in jsonl_files:
             file_path = os.path.join(DATA_DIR, file_name)
@@ -69,11 +108,7 @@ def get_data():
                     except json.JSONDecodeError:
                         print(f"Skipping malformed JSON line in {file_name}: {line}")
 
-        return jsonify({
-            "status": "success",
-            "count": len(records),
-            "data": records
-        })
+        return jsonify({"status": "success", "count": len(records), "data": records})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -185,54 +220,70 @@ def update_chs():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/mission', methods=['POST'])
-def post_mission():
-    """Accepts mission requests from the frontend. Body: {"mission_type": "waypoint", "payload": {..}}
-    Saves the mission to data/last_mission.json and, optionally, calls ROS commands if
-    environment variable ENABLE_ROS_CALL=1 and ROS_MISSION_CMD/ROS_LAUNCH_CMD are provided.
+@app.route('/api/send_selected', methods=['POST'])
+def send_selected():
+    """Accepts JSON: {"selected": ["node_002","node_004"], "nodes": {<mapping>} }
+    Builds an ordered payload containing only the selected nodes (in the specified order)
+    and forwards it to the local TCP socket server at 127.0.0.1:65432. Returns status info.
     """
     try:
         body = request.get_json()
-        if not body or 'mission_type' not in body or 'payload' not in body:
-            return jsonify({"error": "Missing mission_type or payload"}), 400
+        if not body or 'selected' not in body or 'nodes' not in body:
+            return jsonify({"error": "Missing 'selected' list or 'nodes' mapping in body"}), 400
 
-        mission_type = body['mission_type']
-        payload = body['payload']
+        selected = body['selected']
+        nodes = body['nodes']
 
-        out_file = os.path.join(DATA_DIR, 'last_mission.json')
-        with open(out_file, 'w') as f:
-            json.dump({"mission_type": mission_type, "payload": payload}, f, indent=2)
+        # Validate types
+        if not isinstance(selected, list) or not isinstance(nodes, dict):
+            return jsonify({"error": "'selected' must be a list and 'nodes' must be a mapping"}), 400
 
-        # Optionally call ROS service commands if enabled (use with care)
-        enable_ros = os.environ.get('ENABLE_ROS_CALL', '0') == '1'
-        ros_cmd = os.environ.get('ROS_MISSION_CMD')
-        ros_launch_cmd = os.environ.get('ROS_LAUNCH_CMD')
-        results = {"saved": out_file}
+        # Build ordered payload preserving the provided order and only including existing nodes
+        ordered = {}
+        for node_id in selected:
+            if node_id in nodes:
+                ordered[node_id] = nodes[node_id]
 
-        if enable_ros and ros_cmd:
-            # ros_cmd should be a format string with {mission_type} and {payload_json}
-            try:
-                cmd = ros_cmd.format(mission_type=mission_type, payload_json=json.dumps(payload))
-                import subprocess
-                proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
-                results['ros_call'] = {"returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
-            except Exception as e:
-                results['ros_call_error'] = str(e)
+        if not ordered:
+            return jsonify({"error": "No matching nodes found for selection"}), 400
 
-        if enable_ros and ros_launch_cmd:
-            try:
-                cmd2 = ros_launch_cmd.format(mission_type=mission_type)
-                import subprocess
-                proc2 = subprocess.run(cmd2, shell=True, capture_output=True, text=True, timeout=30)
-                results['ros_launch'] = {"returncode": proc2.returncode, "stdout": proc2.stdout, "stderr": proc2.stderr}
-            except Exception as e:
-                results['ros_launch_error'] = str(e)
+        # Send to socket server
+        results = {}
+        try:
+            sock_msg = json.dumps(ordered) + "\n"
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(2.0)
+                s.connect(('127.0.0.1', 65432))
+                s.sendall(sock_msg.encode('utf-8'))
+            results['socket_send'] = 'ok'
+        except Exception as e:
+            results['socket_send_error'] = str(e)
 
-        return jsonify({"status": "ok", "detail": results}), 201
+        # Optionally persist the last mission for debugging
+        try:
+            out_file = os.path.join(DATA_DIR, 'last_selected.json')
+            os.makedirs(DATA_DIR, exist_ok=True)
+            with open(out_file, 'w') as f:
+                json.dump(ordered, f, indent=2)
+            results['saved'] = out_file
+        except Exception:
+            pass
+
+        return jsonify({"status": "ok", "detail": results}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     # Run the server on all interfaces so the base station can access it locally
+    # Ensure DB tables exist for configured nodes
+    try:
+        if os.path.exists(CONFIG_FILE):
+            try:
+                dashboard_db.init_db_from_config(CONFIG_FILE)
+            except Exception as e:
+                print(f"Warning: failed to init DB from config: {e}")
+    except Exception:
+        pass
+
     print("Starting Base Station Dashboard on http://localhost:5001")
     app.run(host='0.0.0.0', port=5001, debug=False)
