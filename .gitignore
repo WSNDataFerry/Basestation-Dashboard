@@ -1,0 +1,28 @@
+# Build / install / log artifacts (colcon)
+build/
+install/
+log/
+logs/
+Micro-XRCE-DDS-Agent/
+
+# ArduPilot SITL artifacts
+terrain/
+eeprom.bin
+mav.parm
+mav.tlog
+mav.tlog.raw
+load.txt
+way.txt
+out.log
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

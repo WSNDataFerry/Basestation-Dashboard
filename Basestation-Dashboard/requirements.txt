@@ -1,0 +1,18 @@
+# Requirements for the Base Station Dashboard (backend)
+# Minimal runtime dependencies for running the Flask dashboard server.
+Flask>=2.0,<3
+requests>=2.20
+# Production WSGI server (optional, recommended for deployment)
+gunicorn>=20.0
+# Useful for loading environment variables from a .env file (optional)
+python-dotenv>=0.21
+
+# Optional / helper packages used by support scripts in tools/
+# (only required if you run the telemetry bridge or serial capture scripts)
+pyserial>=3.5
+pymavlink
+
+# Development / testing (optional)
+pytest>=7.0
+
+# python3 tools/telemetry_mavlink_to_dashboard.py --port /dev/ttyUSB0 --baud 57600 --id drone_1 --autoreconnect

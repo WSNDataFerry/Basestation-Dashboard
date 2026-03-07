@@ -1,0 +1,7 @@
+#Request
+string mission_type
+string payload_json
+---
+#Response
+string accepted
+string message
