@@ -123,6 +123,7 @@ class BasestationNode(Node):
         """
         try:
             text = msg.data if isinstance(msg, String) else msg
+            self.get_logger().info(f"data_terminal_callback received message: {text}")
             parsed = json.loads(text)
         except Exception as e:
             self.get_logger().error(f'data_terminal_callback: failed to parse JSON: {e}')

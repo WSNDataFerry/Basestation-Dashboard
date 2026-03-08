@@ -178,7 +178,9 @@
         </div>
     </template>
 
-    <script>window.MAPBOX_TOKEN = {{ mapbox_token|default(None)|tojson }};</script>
+    <script>
+        window.MAPBOX_TOKEN = "{{ mapbox_token | default(None)| tojson }}";
+    </script>
     <script src="{{ url_for('static', filename='index.js') }}"></script>
 </body>
 

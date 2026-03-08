@@ -230,8 +230,7 @@ function initSSE() {
                 // If drone telemetry
                 if (rec.type && rec.type === 'drone') {
                     updateDrones([rec]);
-                    // update telemetry panel
-                    setActiveDroneTelemetry(rec.id || rec.drone_id || 'drone', rec);
+                    // telemetry panel updated by updateDrones to avoid flicker from partial messages
                 } else if (rec.id) {
                     // node telemetry: append to state.nodes array
                     const nodeId = rec.id;
@@ -303,51 +302,50 @@ function initDroneLayer() {
 
 // Map Initialization
 function initMap() {
-    state.map = L.map('global-map').setView([0, 0], 2); // Default view, auto-fit later
+    state.map = L.map('global-map', { maxZoom: 22 }).setView([0, 0], 2); // Default view, auto-fit later
 
-    // Define multiple base layers
-    const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
-        maxZoom: 19
-    });
+    // Choose a single high-quality satellite tile provider.
+    // If the page was rendered with a Mapbox token (window.MAPBOX_TOKEN), use Mapbox Satellite (best quality, requires token).
+    // Otherwise fall back to Esri World Imagery but suppress 'map data not available' visuals by upscaling.
 
-    const stamenWatercolor = L.tileLayer('https://stamen-tiles-{s}.a.ssl.fastly.net/watercolor/{z}/{x}/{y}.jpg', {
-        attribution: 'Map tiles by Stamen Design, CC BY 3.0 &mdash; Map data &copy; OpenStreetMap contributors',
-        subdomains: 'abcd',
-        maxZoom: 16,
-        tileSize: 256
-    });
-
-    // Fallback: if Stamen tiles fail to load (CORS/rate limits or cached bad URL), switch to Carto Voyager
-    let watercolorTileErrorSeen = false;
-    stamenWatercolor.on('tileerror', function (err) {
-        if (watercolorTileErrorSeen) return;
-        watercolorTileErrorSeen = true;
-        console.warn('Stamen Watercolor tile load failed; switching to Street (Voyager) as fallback', err);
-        try {
-            state.currentBase && state.map.removeLayer(state.currentBase);
-            cartoVoyager.addTo(state.map);
-            state.currentBase = cartoVoyager;
-        } catch (e) {
-            console.error('Failed to switch base layer fallback', e);
+    let satLayer;
+    try {
+        if (window && window.MAPBOX_TOKEN) {
+            const mbUrl = `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=${window.MAPBOX_TOKEN}`;
+            satLayer = L.tileLayer(mbUrl, {
+                attribution: 'Imagery © Mapbox, © OpenStreetMap contributors',
+                tileSize: 512,
+                zoomOffset: -1,
+                maxNativeZoom: 22,
+                maxZoom: 22
+            });
+            console.info('Using Mapbox Satellite tiles');
+        } else {
+            satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+                maxNativeZoom: 19,
+                maxZoom: 22,
+                errorTileUrl: '' // empty to avoid showing 'map data not yet available' tiles
+            });
+            console.info('No Mapbox token found; using Esri World Imagery as fallback');
         }
-    });
-
-    const cartoVoyager = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-        subdomains: 'abcd',
-        maxZoom: 19
-    });
+    } catch (e) {
+        // In case window isn't available (e.g., SSR), fallback to Esri
+        satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+            maxNativeZoom: 19,
+            maxZoom: 22,
+            errorTileUrl: ''
+        });
+    }
 
     // Add default satellite layer
-    esriSat.addTo(state.map);
-    state.currentBase = esriSat;
+    satLayer.addTo(state.map);
+    state.currentBase = satLayer;
 
-    // Layer control (top-right) to switch skins
+    // Layer control (top-right) to switch skins (single entry)
     const baseLayers = {
-        'Satellite': esriSat,
-        'Watercolor (cartoon)': stamenWatercolor,
-        'Street (Voyager)': cartoVoyager
+        'Satellite': satLayer
     };
     // Keep a reference to the control so we can position overlays relative to it
     const layerControl = L.control.layers(baseLayers, null, { position: 'topright', collapsed: false }).addTo(state.map);
@@ -594,8 +592,107 @@ function switchView(view, clusterId = null) {
         viewSubtitle.textContent = 'Data relayed from the drone companion';
         const ferriedView = document.getElementById('ferried-view');
         if (ferriedView) ferriedView.className = 'active-view';
+        // Render ferried UI immediately
+        renderFerriedView();
         if (state.map) setTimeout(() => state.map.invalidateSize(), 100);
     }
+}
+
+// Ferried Data view functions
+function renderFerriedView() {
+    const nodeListEl = document.getElementById('ferried-node-list');
+    const detailEl = document.getElementById('ferried-node-detail');
+    if (!nodeListEl || !detailEl) return;
+    const ids = new Set(Object.keys(state.config || {}));
+    state.nodes.forEach((v, k) => ids.add(k));
+    nodeListEl.innerHTML = '';
+    Array.from(ids).sort().forEach(id => {
+        const li = document.createElement('li');
+        li.style.padding = '8px';
+        li.style.borderBottom = '1px solid rgba(0,0,0,0.06)';
+        li.style.cursor = 'pointer';
+        li.textContent = id;
+        li.addEventListener('click', () => selectFerriedNode(id));
+        nodeListEl.appendChild(li);
+    });
+    if (state.selectedFerriedNode) selectFerriedNode(state.selectedFerriedNode);
+}
+
+function selectFerriedNode(nodeId) {
+    state.selectedFerriedNode = nodeId;
+    renderFerriedNodeDetail(nodeId);
+}
+
+function renderFerriedNodeDetail(nodeId) {
+    const detailEl = document.getElementById('ferried-node-detail');
+    if (!detailEl) return;
+    const records = (state.nodes.get(nodeId) || []).slice().sort((a,b)=> (a.seq||0)-(b.seq||0));
+    if (records.length === 0) {
+        detailEl.innerHTML = `<h3>${nodeId}</h3><p>No ferried records received yet.</p>`;
+        return;
+    }
+    const flat = records.map(r => Object.assign({}, r.payload || {}, r));
+    const exclude = new Set(['id','type','ts','mac','cid','base_mode','custom_mode','system_status','received_at']);
+    const sensorKeys = new Set();
+    flat.forEach(f => { Object.entries(f).forEach(([k,v]) => { if (exclude.has(k)) return; if (k === 'seq') return; if (typeof v === 'number') sensorKeys.add(k); }); });
+    let html = `<h3>${nodeId}</h3>`;
+    const seqVals = flat.map(r => r.seq).filter(s => s != null).map(s=>Number(s));
+    let reliabilityHtml = '<div><em>Seq data not available for reliability metrics.</em></div>';
+    if (seqVals.length > 0) {
+        const uniq = Array.from(new Set(seqVals)).sort((a,b)=>a-b);
+        const minSeq = uniq[0];
+        const maxSeq = uniq[uniq.length-1];
+        const expected = maxSeq - minSeq + 1;
+        const received = uniq.length;
+        const gaps = expected - received;
+        const reliability = ((received / expected) * 100).toFixed(1);
+        reliabilityHtml = `<div><strong>Reliability:</strong> ${reliability}% — Received ${received} of ${expected} (gaps: ${gaps})</div>`;
+    }
+    html += reliabilityHtml;
+    html += '<div id="ferried-sensors" style="display:flex; flex-direction:column; gap:1rem; margin-top:1rem;"></div>';
+    detailEl.innerHTML = html;
+    const sensorsContainer = document.getElementById('ferried-sensors');
+    Array.from(sensorKeys).forEach(sensor => {
+        const series = flat.map(r => ({ seq: r.seq, value: r[sensor], ts: r.ts })).filter(x => x.seq != null && x.value != null);
+        if (series.length === 0) return;
+        const panel = document.createElement('div');
+        panel.className = 'glass-panel';
+        panel.style.padding = '8px';
+        panel.innerHTML = `<h4>${sensor}</h4><div style="display:flex; gap:1rem; align-items:flex-start;"><canvas id="chart_${nodeId}_${sensor}" style="width:100%; height:180px;"></canvas><div style="flex:0 0 260px; overflow:auto;"><table style="width:100%; font-size:12px;"><thead><tr><th>Seq</th><th>Value</th><th>Time</th></tr></thead><tbody id="tbl_${nodeId}_${sensor}"></tbody></table></div></div>`;
+        sensorsContainer.appendChild(panel);
+        const tbody = panel.querySelector(`#tbl_${nodeId}_${sensor}`);
+        series.slice().reverse().forEach(pt => {
+            const tr = document.createElement('tr');
+            const tseq = document.createElement('td'); tseq.textContent = pt.seq;
+            const tval = document.createElement('td'); tval.textContent = pt.value;
+            const tts = document.createElement('td'); tts.textContent = pt.ts ? new Date(pt.ts*1000).toLocaleString() : '-';
+            tr.appendChild(tseq); tr.appendChild(tval); tr.appendChild(tts);
+            tbody.appendChild(tr);
+        });
+        const ctx = panel.querySelector(`#chart_${nodeId}_${sensor}`).getContext('2d');
+        const chartKey = `${nodeId}::${sensor}`;
+        if (!state.ferriedCharts) state.ferriedCharts = new Map();
+        if (state.ferriedCharts.has(chartKey)) { try { state.ferriedCharts.get(chartKey).destroy(); } catch (e) {} }
+        const chartData = { datasets: [{ label: `${sensor} vs seq`, data: series.map(s => ({ x: s.seq, y: s.value, ts: s.ts })), borderColor: '#3b82f6', backgroundColor: '#3b82f615', tension: 0.2, pointRadius: 3 }] };
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: chartData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { x: { type: 'linear', title: { display: true, text: 'Seq' } }, y: { title: { display: true, text: 'Value' } } },
+                plugins: { tooltip: { callbacks: { label: function(context) { const raw = context.raw || {}; const ts = raw.ts ? new Date(raw.ts*1000).toLocaleString() : '-'; return `Seq: ${raw.x}  Value: ${raw.y}  Time: ${ts}`; } } } }
+            }
+        });
+        state.ferriedCharts.set(chartKey, chart);
+    });
+    const disc = document.createElement('div');
+    disc.className = 'glass-panel';
+    disc.style.marginTop = '1rem';
+    const totalGenerated = (seqVals.length>0) ? (Math.max(...seqVals) - Math.min(...seqVals) + 1) : 0;
+    const totalReceived = Array.from(new Set(seqVals)).length;
+    disc.innerHTML = `<h4>Reliability Summary</h4><p>Node generated ~${totalGenerated} sequence numbers in range; received ${totalReceived}. Missing packets may be held on-board (ms_nodes spiff storage) or dropped en-route.</p>`;
+    detailEl.appendChild(disc);
 }
 
 function renderSidebar(clustersSeen) {
@@ -1051,17 +1148,60 @@ function updateDrones(droneRecords) {
 // Telemetry side panel update
 function setActiveDroneTelemetry(id, telemetry) {
     try {
-        document.getElementById('telemetry-id').textContent = id || '-';
-        document.getElementById('telemetry-time').textContent = telemetry.ts ? new Date(telemetry.ts*1000).toLocaleTimeString() : '-';
-        document.getElementById('telemetry-loc').textContent = (telemetry.lat && telemetry.lon) ? `${telemetry.lat.toFixed(6)}, ${telemetry.lon.toFixed(6)}` : '-';
-        document.getElementById('telemetry-alt').textContent = telemetry.alt != null ? `${telemetry.alt} m` : '-';
-        document.getElementById('telemetry-heading').textContent = telemetry.heading != null ? `${telemetry.heading}°` : '-';
-        document.getElementById('telemetry-gs').textContent = telemetry.groundspeed != null ? `${telemetry.groundspeed} m/s` : '-';
-        document.getElementById('telemetry-rpy').textContent = (telemetry.roll!=null||telemetry.pitch!=null||telemetry.yaw!=null) ? `${telemetry.roll||'-'} / ${telemetry.pitch||'-'} / ${telemetry.yaw||'-'}` : '-';
-        // Map custom_mode via human-readable map
-        const modeStr = interpretMode(telemetry);
-        document.getElementById('telemetry-mode').textContent = modeStr;
-        document.getElementById('telemetry-batt').textContent = telemetry.battery != null ? `${telemetry.battery} V` : '-';
+        // Only update ID if a valid id provided to avoid clearing the last shown id
+        if (id) {
+            const elId = document.getElementById('telemetry-id');
+            if (elId) elId.textContent = id;
+        }
+
+        // Time: update only when timestamp is present
+        if (telemetry && telemetry.ts != null) {
+            const elTime = document.getElementById('telemetry-time');
+            if (elTime) elTime.textContent = new Date(telemetry.ts*1000).toLocaleTimeString();
+        }
+
+        // Location: require both lat and lon to update
+        if (telemetry && telemetry.lat != null && telemetry.lon != null) {
+            const elLoc = document.getElementById('telemetry-loc');
+            if (elLoc) elLoc.textContent = `${parseFloat(telemetry.lat).toFixed(6)}, ${parseFloat(telemetry.lon).toFixed(6)}`;
+        }
+
+        // Altitude
+        if (telemetry && telemetry.alt != null) {
+            const elAlt = document.getElementById('telemetry-alt');
+            if (elAlt) elAlt.textContent = `${telemetry.alt} m`;
+        }
+
+        // Heading
+        if (telemetry && telemetry.heading != null) {
+            const elHeading = document.getElementById('telemetry-heading');
+            if (elHeading) elHeading.textContent = `${telemetry.heading}°`;
+        }
+
+        // Groundspeed
+        if (telemetry && telemetry.groundspeed != null) {
+            const elGs = document.getElementById('telemetry-gs');
+            if (elGs) elGs.textContent = `${telemetry.groundspeed} m/s`;
+        }
+
+        // Roll/Pitch/Yaw - update only if at least one value is present
+        if (telemetry && (telemetry.roll!=null || telemetry.pitch!=null || telemetry.yaw!=null)) {
+            const elRpy = document.getElementById('telemetry-rpy');
+            if (elRpy) elRpy.textContent = `${telemetry.roll!=null?telemetry.roll:'-'} / ${telemetry.pitch!=null?telemetry.pitch:'-'} / ${telemetry.yaw!=null?telemetry.yaw:'-'}`;
+        }
+
+        // Mode: only update if any mode fields are present
+        if (telemetry && (telemetry.custom_mode != null || telemetry.base_mode != null || telemetry.system_status != null)) {
+            const modeStr = interpretMode(telemetry);
+            const elMode = document.getElementById('telemetry-mode');
+            if (elMode) elMode.textContent = modeStr;
+        }
+
+        // Battery
+        if (telemetry && telemetry.battery != null) {
+            const elBatt = document.getElementById('telemetry-batt');
+            if (elBatt) elBatt.textContent = `${telemetry.battery} V`;
+        }
     } catch (e) {
         // ignore DOM errors when panel missing
     }

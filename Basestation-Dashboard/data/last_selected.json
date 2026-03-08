@@ -1,24 +1,24 @@
 {
   "node_003": {
-    "gps_lat": 6.724121183196928,
-    "gps_lon": 80.05713483137498,
-    "height_from_the_ground": 0,
+    "gps_lat": -35.358262,
+    "gps_lon": 149.160237,
+    "height_from_the_ground": 0.0,
     "hover": false,
-    "is_ch": true
-  },
-  "node_002": {
-    "gps_lat": 6.7242519906468345,
-    "gps_lon": 80.05730153568186,
-    "height_from_the_ground": 5,
-    "hover": true,
     "is_ch": true
   },
   "node_001": {
-    "gps_lat": 6.724334165803668,
-    "gps_lon": 80.05655884011907,
-    "height_from_the_ground": 0,
+    "gps_lat": -35.358262,
+    "gps_lon": 149.165237,
+    "height_from_the_ground": 0.0,
     "hover": false,
     "is_ch": true,
     "rtl": true
+  },
+  "node_002": {
+    "gps_lat": -35.363262,
+    "gps_lon": 149.170237,
+    "height_from_the_ground": 5.0,
+    "hover": true,
+    "is_ch": true
   }
 }
