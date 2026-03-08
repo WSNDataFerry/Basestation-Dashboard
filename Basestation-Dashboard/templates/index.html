@@ -122,11 +122,18 @@
                         <!-- Node Cards injected here -->
                     </div>
                 </div>
-                <!-- Ferried Data View (placeholder) -->
+                <!-- Ferried Data View -->
                 <div id="ferried-view" class="hidden-view">
-                    <div class="glass-panel">
-                        <h3>Ferried Data</h3>
-                        <p>Data coming from the drone's onboard companion computer will be shown here. (To be implemented)</p>
+                    <div class="glass-panel ferried-layout" style="display:flex; gap:1rem;">
+                        <div id="ferried-sidebar" style="width:260px; overflow:auto;">
+                            <h4>Nodes</h4>
+                            <ul id="ferried-node-list" style="list-style:none; padding:0; margin:0;"></ul>
+                        </div>
+                        <div id="ferried-main" style="flex:1; overflow:auto;">
+                            <div id="ferried-node-detail">
+                                <h3>Select a node to view ferried time-series</h3>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -171,6 +178,7 @@
         </div>
     </template>
 
+    <script>window.MAPBOX_TOKEN = {{ mapbox_token|default(None)|tojson }};</script>
     <script src="{{ url_for('static', filename='index.js') }}"></script>
 </body>
 
