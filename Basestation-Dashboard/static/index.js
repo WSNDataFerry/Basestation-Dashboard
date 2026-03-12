@@ -308,10 +308,13 @@ function initMap() {
     // If the page was rendered with a Mapbox token (window.MAPBOX_TOKEN), use Mapbox Satellite (best quality, requires token).
     // Otherwise fall back to Esri World Imagery but suppress 'map data not available' visuals by upscaling.
 
+
     let satLayer;
     try {
-        if (window && window.MAPBOX_TOKEN) {
-            const mbUrl = `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=${window.MAPBOX_TOKEN}`;
+        // Only use Mapbox if the token is a non-empty string
+        const token = window && window.MAPBOX_TOKEN;
+        if (typeof token === 'string' && token.trim() !== '' && token !== 'null' && token !== 'undefined') {
+            const mbUrl = `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=${token}`;
             satLayer = L.tileLayer(mbUrl, {
                 attribution: 'Imagery © Mapbox, © OpenStreetMap contributors',
                 tileSize: 512,

@@ -2,8 +2,8 @@
     "node_001": {
         "mac": "1020ba4c598e",
         "device_id": 3125565838,
-        "gps_lat": -35.358262,
-        "gps_lon": 149.165237,
+        "gps_lat": 6.7243916,
+        "gps_lon": 80.0571974,
         "height_from_the_ground": 0.0,
         "hover": "False",
         "rtl": "True",
@@ -12,8 +12,8 @@
     "node_002": {
         "mac": "1020ba4deb1e",
         "device_id": 3125668638,
-        "gps_lat": -35.363262,
-        "gps_lon": 149.170237,
+        "gps_lat": 6.7239681,
+        "gps_lon": 80.0570056,
         "height_from_the_ground": 5.0,
         "hover": "True",
         "is_ch": true
@@ -21,8 +21,8 @@
     "node_003": {
         "mac": "1020ba4e2682",
         "device_id": 3125683842,
-        "gps_lat": -35.358262,
-        "gps_lon": 149.160237,
+        "gps_lat": 6.7243557,
+        "gps_lon":80.0566016,
         "height_from_the_ground": 0.0,
         "hover": "False",
         "is_ch": true

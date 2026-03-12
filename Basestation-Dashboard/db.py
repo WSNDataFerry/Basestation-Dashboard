@@ -104,3 +104,40 @@ def query_recent(node_id: str, limit: int = 100, db_path: str = DEFAULT_DB) -> L
         results.append(obj)
     conn.close()
     return results
+
+def display_a_record(record: Dict[str, Any]):
+    print(f"Record from node {record.get('mac', 'unknown')} at {record.get('ts', 'unknown')}:")
+    print(f"  Temperature: {record.get('t', 'N/A')} °C")
+    print(f"  Humidity: {record.get('h', 'N/A')} %")
+    print(f"  Pressure: {record.get('p', 'N/A')} hPa")
+    print(f"  Air Quality (q): {record.get('q', 'N/A')}")
+    print(f"  eCO2: {record.get('eco2', 'N/A')} ppm")
+    print(f"  TVOC: {record.get('tvoc', 'N/A')} ppb")
+    print(f"  Magnetometer: mx={record.get('mx', 'N/A')}, my={record.get('my', 'N/A')}, mz={record.get('mz', 'N/A')}")
+    print(f"  Acceleration: a={record.get('a', 'N/A')} m/s²")
+    print(f"  Received at: {record.get('received_at', 'unknown')}")
+
+
+def clear_all_tables(db_path: str = DEFAULT_DB):
+    """Drop all tables in the database (removes all data and tables)."""
+    if not os.path.exists(db_path):
+        return
+    conn = _open_conn(db_path)
+    cur = conn.cursor()
+    # Get all table names
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    tables = [row[0] for row in cur.fetchall()]
+    for table in tables:
+        if table.startswith('sqlite_'):
+            continue  # skip internal SQLite tables
+        cur.execute(f'DROP TABLE IF EXISTS "{table}";')
+    conn.commit()
+    conn.close()
+
+if __name__ == '__main__':
+    # Example usage
+    init_db_from_config('/home/dev/ros2_ws/Basestation-Dashboard/data/nodes_config.json')
+    clear_all_tables()
+    # query_result = query_recent('node_001', limit=5)
+    # for record in query_result:
+    #     display_a_record(record)

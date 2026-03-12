@@ -17,6 +17,8 @@ class BasestationNode(Node):
         self.publisher_ = self.create_publisher(String, 'topic_name', 10)
 
         self.mission_payload = {}
+        self.mission_active = False
+        self.waiting_for_mission = True
 
         self.launch_client = self.create_client(Trigger, '/waypoint_mission/launch')
         self.mission_select_client = self.create_client(MissionSelect, '/mission_manager/mission_select')
@@ -43,36 +45,8 @@ class BasestationNode(Node):
             if os.path.exists(cfg_path):
                 with open(cfg_path, 'r') as f:
                     cfg = json.load(f)
-                # store cfg for later lookups
                 self.node_config = cfg
-                conn = sqlite3.connect(self.db_path, check_same_thread=False)
-                cur = conn.cursor()
                 for node_id, meta in cfg.items():
-                    # create per-node table
-                    cur.execute(f"""
-                    CREATE TABLE IF NOT EXISTS "{node_id}" (
-                        rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-                        device_id INTEGER,
-                        seq INTEGER,
-                        mac TEXT,
-                        ts INTEGER,
-                        t REAL,
-                        h REAL,
-                        p REAL,
-                        q INTEGER,
-                        eco2 INTEGER,
-                        tvoc INTEGER,
-                        mx REAL,
-                        my REAL,
-                        mz REAL,
-                        a REAL,
-                        payload TEXT,
-                        received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                    """)
-                    cur.execute(f'CREATE INDEX IF NOT EXISTS idx_{node_id}_ts ON "{node_id}"(ts);')
-
-                    # build reverse lookup maps if mac or device_id provided in config
                     if isinstance(meta, dict):
                         mac = meta.get('mac')
                         if isinstance(mac, str) and mac.strip():
@@ -84,8 +58,7 @@ class BasestationNode(Node):
                                 self.id_to_node[int(dev_id)] = node_id
                             except Exception:
                                 pass
-                conn.commit()
-                conn.close()
+
         except Exception as e:
             self.get_logger().error(f"Failed to initialize DB tables: {e}")
 
@@ -124,6 +97,9 @@ class BasestationNode(Node):
         try:
             text = msg.data if isinstance(msg, String) else msg
             self.get_logger().info(f"data_terminal_callback received message: {text}")
+            if text == "END_OF_DATA":
+                self.get_logger().info("Received END_OF_DATA signal, ignoring.")
+                return
             parsed = json.loads(text)
         except Exception as e:
             self.get_logger().error(f'data_terminal_callback: failed to parse JSON: {e}')
@@ -245,31 +221,49 @@ class BasestationNode(Node):
                 self.client_socket = None
 
     def _process_incoming_mission(self, msg: str):
-        """Validate incoming JSON, set the mission payload and call services to select and launch."""
+
+        if self.mission_active:
+            self.get_logger().warn("Mission already active. Ignoring new request.")
+            return
+
+        self.mission_active = True
+        self.waiting_for_mission = False
+
         try:
             parsed = json.loads(msg)
             payload_str = json.dumps(parsed)
         except Exception as e:
             self.get_logger().error(f"Invalid JSON received, ignoring: {e}")
+            self.reset_state()
             return
 
         self.mission_payload = payload_str
+
         self.get_logger().info(f'[Base_station] mission payload set: {self.mission_payload}')
-        self.get_logger().info(f'[Base_station] Attempting to select mission via service')
+        self.get_logger().info('[Base_station] Selecting mission')
 
         try:
             ok = self.mission_select()
+
             if not ok:
-                self.get_logger().error('[Base_station] mission_select failed; aborting launch')
+                self.get_logger().error("Mission select failed")
+                self.reset_state()
                 return
-            self.get_logger().info('[Base_station] Mission selected, attempting launch')
+
             launched = self.waypoint_launch()
+
             if launched:
-                self.get_logger().info('[Base_station] Mission launched successfully after socket receive')
+                self.get_logger().info("Mission launched successfully")
+
             else:
-                self.get_logger().error('[Base_station] Mission launch failed after socket receive')
+                self.get_logger().error("Mission launch failed")
+
         except Exception as e:
-            self.get_logger().error(f'[Base_station] Exception while processing incoming mission: {e}')
+            self.get_logger().error(f"Mission execution error: {e}")
+
+        finally:
+            # After mission execution allow next mission
+            self.reset_state()
 
     def _insert_node_record(self, node_id: str, record: dict):
         try:
@@ -302,8 +296,34 @@ class BasestationNode(Node):
                 self.get_logger().info(f'[WSN_DATA_OFFBOARD] Published data for {node_id}: {out_msg.data}')
             except Exception as e:
                 self.get_logger().error(f'Failed to publish message after DB insert: {e}')
-        except Exception as e:
+        except Exception as e:  
             self.get_logger().error(f'Error inserting record into DB for {node_id}: {e}')
+    
+    def reset_state(self):
+        """Reset basestation state to accept a new mission request."""
+        self.get_logger().info("[Base_station] Resetting state for next mission")
+
+        try:
+            # Reset mission flags
+            self.mission_active = False
+            self.waiting_for_mission = True
+            self.mission_payload = {}
+
+            # Close existing client socket
+            if self.client_socket:
+                try:
+                    self.client_socket.close()
+                except Exception:
+                    pass
+
+            self.client_socket = None
+            self.client_address = None
+
+            self.get_logger().info("[Base_station] Ready for next mission request")
+
+        except Exception as e:
+            self.get_logger().error(f"[Base_station] Reset failed: {e}")
+
 
 def main(args=None):
     rclpy.init(args=args)

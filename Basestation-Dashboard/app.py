@@ -54,7 +54,8 @@ def get_data():
                         out = r.get('payload') if isinstance(r.get('payload'), dict) else {}
                         out.update({
                             "_rowid": r.get('rowid'),
-                            "_received_at": r.get('received_at')
+                            "_received_at": r.get('received_at'),
+                            "id": node_id  # Ensure the node id is present for frontend grouping
                         })
                         records.append(out)
                 # Also include drone telemetry records from log files (DB only stores WSN node data)

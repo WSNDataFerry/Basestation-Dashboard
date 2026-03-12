@@ -10,37 +10,8 @@ import os
 def generate_launch_description():
     ws_root = '/home/dev/ros2_ws'
     dashboard_path = os.path.join(ws_root, 'Basestation-Dashboard', 'app.py')
+    telemetry_path = os.path.join(ws_root, 'Basestation-Dashboard', 'tools', 'telemetry_mavlink_to_dashboard.py')
 
-    fcu_url_arg = DeclareLaunchArgument(
-        'fcu_url',
-        default_value='udp://127.0.0.1:14550@14555',
-        description='FCU URL for MAVROS connection'
-    )
-
-    # 1) ardupilot_gz_bringup — starts immediately
-    ardupilot_gz_bringup_dir = get_package_share_directory('ardupilot_gz_bringup')
-    ardupilot_include = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(ardupilot_gz_bringup_dir, 'launch', 'iris_runway.launch.py')
-        )
-    )
-
-    mavros_dir = '/opt/ros/humble/share/mavros/launch'
-    mavros_include = TimerAction(
-        period=10.0,
-        actions=[
-            IncludeLaunchDescription(
-                AnyLaunchDescriptionSource(
-                    os.path.join(mavros_dir, 'px4.launch')
-                ),
-                launch_arguments={
-                    'fcu_url': LaunchConfiguration('fcu_url')
-                }.items()
-            )
-        ]
-    )
-
-    # 3) Flask dashboard — starts after 10 + 2 = 12 sec
     dashboard = TimerAction(
         period=12.0,
         actions=[
@@ -52,7 +23,16 @@ def generate_launch_description():
         ]
     )
 
-    # 4) basestation_node — starts after 10 + 2 + 2 = 14 sec
+    telemetry_bridge = ExecuteProcess(
+        cmd=[
+            'python3',
+            telemetry_path,
+            '--port', '/dev/ttyUSB0',
+            '--baud', '57600',
+            '--id', 'drone_1'
+        ],
+        output='screen'
+    )
     basestation = TimerAction(
         period=14.0,
         actions=[
@@ -66,9 +46,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        fcu_url_arg,
-        ardupilot_include,   # t=0s
-        mavros_include,      # t=5s
-        dashboard,           # t=7s
+        dashboard,
+        telemetry_bridge,    # t=7s
         basestation,         # t=9s
     ])
