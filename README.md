@@ -4,6 +4,20 @@
 
 ---
 
+## System Diagrams
+
+### ROS 2 Node Architecture
+
+> The diagram below shows the ROS 2 node architecture. Nodes such as `mission_manager`, `waypoint_mission`, and `wsn_onboard_node` are defined in this repository.
+
+![ROS 2 Node Architecture](assets/ros2_node_architecture.png)
+
+### Dashboard & System Overview
+
+![Dashboard System Diagram](assets/dashboard_system_diagram.png)
+
+---
+
 ## Table of Contents
 
 - [System Overview](#system-overview)
@@ -291,6 +305,9 @@ ros2 service call /mission_manager/mission_status \
 ```
 ros2_ws/
 ├── README.md                          ← You are here
+├── assets/
+│   ├── ros2_node_architecture.png     ← ROS 2 node graph
+│   └── dashboard_system_diagram.png   ← System overview diagram
 ├── config/
 │   ├── fastdds_discovery.xml          ← FastDDS unicast peer discovery (copy to both machines)
 │   ├── setup_container.bash           ← Source inside Docker container
