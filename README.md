@@ -1,6 +1,6 @@
 # UAV–WSN Data Collection System
 
-> Autonomous drone mission system for collecting data from ground-based Wireless Sensor Network (WSN) nodes using ROS 2 Humble, ArduPilot SITL, MAVROS, and Gazebo.
+Autonomous drone mission system for collecting data from ground-based Wireless Sensor Network (WSN) nodes using ROS 2 Humble, ArduPilot SITL, MAVROS, and Gazebo.
 
 ---
 
@@ -8,7 +8,7 @@
 
 ### ROS 2 Node Architecture
 
-> The diagram below shows the ROS 2 node architecture. Nodes such as `mission_manager`, `waypoint_mission`, and `wsn_onboard_node` are defined in this repository.
+The diagram below shows the ROS 2 node architecture. Nodes such as `mission_manager`, `waypoint_mission`, and `wsn_onboard_node` are defined in this repository.
 
 ![ROS 2 Node Architecture](assets/ros2_node_architecture.png)
 
